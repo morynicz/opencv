@@ -578,7 +578,7 @@ public:
                 for( int mode = 0; mode < nmodes; mode++, mean_m += nchannels )
                 {
                     float weight = alpha1*gmm[mode].weight + prune;//need only weight if fit is found
-
+                    int swap_count = 0;
                     ////
                     //fit not found yet
                     if( !fitsPDF )
@@ -643,6 +643,7 @@ public:
                                 if( weight < gmm[i-1].weight )
                                     break;
 
+                                swap_count++;
                                 //swap one up
                                 std::swap(gmm[i], gmm[i-1]);
                                 for( int c = 0; c < nchannels; c++ )
@@ -660,7 +661,7 @@ public:
                         nmodes--;
                     }
 
-                    gmm[mode].weight = weight;//update weight by the calculated value
+                    gmm[mode-swap_count].weight = weight;//update weight by the calculated value
                     totalWeight += weight;
                 }
                 //go through all modes
@@ -779,7 +780,7 @@ bool BackgroundSubtractorMOG2Impl::ocl_apply(InputArray _image, OutputArray _fgm
     idxArg = kernel_apply.set(idxArg, varMax);
     idxArg = kernel_apply.set(idxArg, fVarInit);
     idxArg = kernel_apply.set(idxArg, fTau);
-    idxArg = kernel_apply.set(idxArg, nShadowDetection);
+    kernel_apply.set(idxArg, nShadowDetection);
 
     size_t globalsize[] = {frame.cols, frame.rows, 1};
 
@@ -805,7 +806,7 @@ bool BackgroundSubtractorMOG2Impl::ocl_getBackgroundImage(OutputArray _backgroun
     idxArg = kernel_getBg.set(idxArg, ocl::KernelArg::ReadOnlyNoSize(u_weight));
     idxArg = kernel_getBg.set(idxArg, ocl::KernelArg::ReadOnlyNoSize(u_mean));
     idxArg = kernel_getBg.set(idxArg, ocl::KernelArg::WriteOnlyNoSize(dst));
-    idxArg = kernel_getBg.set(idxArg, backgroundRatio);
+    kernel_getBg.set(idxArg, backgroundRatio);
 
     size_t globalsize[2] = {u_bgmodelUsedModes.cols, u_bgmodelUsedModes.rows};
 

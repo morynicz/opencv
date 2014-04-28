@@ -121,7 +121,7 @@ public:
                         CV_Assert(img.type() == img_test.type());
                         CV_Assert(num_channels == img_test.channels());
 
-                        double n = norm(img, img_test);
+                        double n = cvtest::norm(img, img_test, NORM_L2);
                         if ( n > 1.0)
                         {
                             ts->printf(ts->LOG, "norm = %f \n", n);
@@ -151,7 +151,7 @@ public:
                     CV_Assert(img.size() == img_test.size());
                     CV_Assert(img.type() == img_test.type());
 
-                    double n = norm(img, img_test);
+                    double n = cvtest::norm(img, img_test, NORM_L2);
                     if ( n > 1.0)
                     {
                         ts->printf(ts->LOG, "norm = %f \n", n);
@@ -183,7 +183,7 @@ public:
                     CV_Assert(img.type() == img_test.type());
 
 
-                    double n = norm(img, img_test);
+                    double n = cvtest::norm(img, img_test, NORM_L2);
                     if ( n > 1.0)
                     {
                         ts->printf(ts->LOG, "norm = %f \n", n);
@@ -210,7 +210,7 @@ public:
         {
             Mat rle = imread(string(ts->get_data_path()) + "readwrite/rle8.bmp");
             Mat bmp = imread(string(ts->get_data_path()) + "readwrite/ordinary.bmp");
-            if (norm(rle-bmp)>1.e-10)
+            if (cvtest::norm(rle-bmp, NORM_L2)>1.e-10)
                 ts->set_failed_test_info(cvtest::TS::FAIL_BAD_ACCURACY);
         }
         catch(...)
@@ -386,6 +386,54 @@ TEST(Highgui_Jpeg, encode_empty)
 
     ASSERT_THROW(cv::imencode(".jpg", img, jpegImg), cv::Exception);
 }
+
+TEST(Highgui_Jpeg, encode_decode_progressive_jpeg)
+{
+    cvtest::TS& ts = *cvtest::TS::ptr();
+    string input = string(ts.get_data_path()) + "../cv/shared/lena.png";
+    cv::Mat img = cv::imread(input);
+    ASSERT_FALSE(img.empty());
+
+    std::vector<int> params;
+    params.push_back(IMWRITE_JPEG_PROGRESSIVE);
+    params.push_back(1);
+
+    string output_progressive = cv::tempfile(".jpg");
+    EXPECT_NO_THROW(cv::imwrite(output_progressive, img, params));
+    cv::Mat img_jpg_progressive = cv::imread(output_progressive);
+
+    string output_normal = cv::tempfile(".jpg");
+    EXPECT_NO_THROW(cv::imwrite(output_normal, img));
+    cv::Mat img_jpg_normal = cv::imread(output_normal);
+
+    EXPECT_EQ(0, cvtest::norm(img_jpg_progressive, img_jpg_normal, NORM_INF));
+
+    remove(output_progressive.c_str());
+}
+
+TEST(Highgui_Jpeg, encode_decode_optimize_jpeg)
+{
+    cvtest::TS& ts = *cvtest::TS::ptr();
+    string input = string(ts.get_data_path()) + "../cv/shared/lena.png";
+    cv::Mat img = cv::imread(input);
+    ASSERT_FALSE(img.empty());
+
+    std::vector<int> params;
+    params.push_back(IMWRITE_JPEG_OPTIMIZE);
+    params.push_back(1);
+
+    string output_optimized = cv::tempfile(".jpg");
+    EXPECT_NO_THROW(cv::imwrite(output_optimized, img, params));
+    cv::Mat img_jpg_optimized = cv::imread(output_optimized);
+
+    string output_normal = cv::tempfile(".jpg");
+    EXPECT_NO_THROW(cv::imwrite(output_normal, img));
+    cv::Mat img_jpg_normal = cv::imread(output_normal);
+
+    EXPECT_EQ(0, cvtest::norm(img_jpg_optimized, img_jpg_normal, NORM_INF));
+
+    remove(output_optimized.c_str());
+}
 #endif
 
 
@@ -396,7 +444,13 @@ TEST(Highgui_Jpeg, encode_empty)
 #define int64 int64_hack_
 #include "tiff.h"
 
+#ifdef ANDROID
+// Test disabled as it uses a lot of memory.
+// It is killed with SIGKILL by out of memory killer.
+TEST(Highgui_Tiff, DISABLED_decode_tile16384x16384)
+#else
 TEST(Highgui_Tiff, decode_tile16384x16384)
+#endif
 {
     // see issue #2161
     cv::Mat big(16384, 16384, CV_8UC1, cv::Scalar::all(0));
@@ -471,6 +525,47 @@ TEST(Highgui_Tiff, write_read_16bit_big_little_endian)
     }
 }
 
+class CV_GrfmtReadTifTiledWithNotFullTiles: public cvtest::BaseTest
+{
+public:
+    void run(int)
+    {
+        try
+        {
+            /* see issue #3472 - dealing with tiled images where the tile size is
+             * not a multiple of image size.
+             * The tiled images were created with 'convert' from ImageMagick,
+             * using the command 'convert <input> -define tiff:tile-geometry=128x128 -depth [8|16] <output>
+             * Note that the conversion to 16 bits expands the range from 0-255 to 0-255*255,
+             * so the test converts back but rounding errors cause small differences.
+             */
+            cv::Mat img = imread(string(ts->get_data_path()) + "readwrite/non_tiled.tif",-1);
+            if (img.empty()) ts->set_failed_test_info(cvtest::TS::FAIL_INVALID_TEST_DATA);
+            ASSERT_TRUE(img.channels() == 3);
+            cv::Mat tiled8 = imread(string(ts->get_data_path()) + "readwrite/tiled_8.tif", -1);
+            if (tiled8.empty()) ts->set_failed_test_info(cvtest::TS::FAIL_INVALID_TEST_DATA);
+            ASSERT_PRED_FORMAT2(cvtest::MatComparator(0, 0), img, tiled8);
+
+            cv::Mat tiled16 = imread(string(ts->get_data_path()) + "readwrite/tiled_16.tif", -1);
+            if (tiled16.empty()) ts->set_failed_test_info(cvtest::TS::FAIL_INVALID_TEST_DATA);
+            ASSERT_TRUE(tiled16.elemSize() == 6);
+            tiled16.convertTo(tiled8, CV_8UC3, 1./256.);
+            ASSERT_PRED_FORMAT2(cvtest::MatComparator(2, 0), img, tiled8);
+            // What about 32, 64 bit?
+        }
+        catch(...)
+        {
+            ts->set_failed_test_info(cvtest::TS::FAIL_EXCEPTION);
+        }
+        ts->set_failed_test_info(cvtest::TS::OK);
+    }
+};
+
+TEST(Highgui_Tiff, decode_tile_remainder)
+{
+    CV_GrfmtReadTifTiledWithNotFullTiles test; test.safe_run();
+}
+
 #endif
 
 #ifdef HAVE_WEBP
@@ -517,11 +612,11 @@ TEST(Highgui_WebP, encode_decode_lossless_webp)
 
     cv::Mat decode = cv::imdecode(buf, IMREAD_COLOR);
     ASSERT_FALSE(decode.empty());
-    EXPECT_TRUE(cv::norm(decode, img_webp, NORM_INF) == 0);
+    EXPECT_TRUE(cvtest::norm(decode, img_webp, NORM_INF) == 0);
 
     ASSERT_FALSE(img_webp.empty());
 
-    EXPECT_TRUE(cv::norm(img, img_webp, NORM_INF) == 0);
+    EXPECT_TRUE(cvtest::norm(img, img_webp, NORM_INF) == 0);
 }
 
 TEST(Highgui_WebP, encode_decode_lossy_webp)
